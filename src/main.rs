@@ -17,38 +17,41 @@ fn listen(socket: &net::UdpSocket) {
   println!("received message: {:?}", result_str);
 
   if result_str.contains("S0R1") {
-    write_file("Race active", "racestate.txt");
-    write_file("00", "rx1.txt");
-    write_file("00", "rx2.txt");
-    write_file("00", "rx3.txt");
+    write_file("Race active".to_string(), "racestate.txt");
+    write_file("00".to_string(), "rx1.txt");
+    write_file("00".to_string(), "rx2.txt");
+    write_file("00".to_string(), "rx3.txt");
   }
   if result_str.contains("S0R0") {
-    write_file("Race inactive", "racestate.txt");
+    write_file("Race inactive".to_string(), "racestate.txt");
   }
 
   if result_str.contains("S0L") {
     // zb    sS1L0000000DAF
-    write_file(&result_str[3..5], "rx1.txt");
+    let intval = &result_str[3..5].parse::<i32>().unwrap();
+    write_file((intval + 1).to_string(), "rx1.txt");
   }
   if result_str.contains("S1L") {
-    write_file(&result_str[3..5], "rx2.txt");
+    let intval = &result_str[3..5].parse::<i32>().unwrap();
+    write_file((intval + 1).to_string(), "rx2.txt");
   }
   if result_str.contains("S2L") {
-    write_file(&result_str[3..5], "rx3.txt");
+    let intval = &result_str[3..5].parse::<i32>().unwrap();
+    write_file((intval + 1).to_string(), "rx3.txt");
   }
 }
 
-fn write_file(text: &str, filename: &str) {
+fn write_file(text: String, filename: &str) {
   let mut file = std::fs::File::create(filename).expect("create failed");
   file.write_all(text.as_bytes()).expect("write failed");
   //println!("data written to file");
 }
 
 fn main() {
-  write_file("Race inactive", "racestate.txt");
-  write_file("00", "rx1.txt");
-  write_file("00", "rx2.txt");
-  write_file("00", "rx3.txt");
+  write_file("Race inactive".to_string(), "racestate.txt");
+  write_file("0".to_string(), "rx1.txt");
+  write_file("0".to_string(), "rx2.txt");
+  write_file("0".to_string(), "rx3.txt");
 
   let socket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host socket"); // local bind port
 
