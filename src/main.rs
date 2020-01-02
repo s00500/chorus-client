@@ -18,9 +18,9 @@ fn listen(socket: &net::UdpSocket) {
 
   if result_str.contains("S0R1") {
     write_file("Race active".to_string(), "racestate.txt");
-    write_file("00".to_string(), "rx1.txt");
-    write_file("00".to_string(), "rx2.txt");
-    write_file("00".to_string(), "rx3.txt");
+    write_file("0".to_string(), "rx1.txt");
+    write_file("0".to_string(), "rx2.txt");
+    write_file("0".to_string(), "rx3.txt");
   }
   if result_str.contains("S0R0") {
     write_file("Race inactive".to_string(), "racestate.txt");
@@ -28,16 +28,22 @@ fn listen(socket: &net::UdpSocket) {
 
   if result_str.contains("S0L") {
     // zb    sS1L0000000DAF
-    let intval = &result_str[3..5].parse::<i32>().unwrap();
-    write_file((intval + 1).to_string(), "rx1.txt");
+    let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
+    if *intval != -1 {
+     write_file((intval + 1).to_string(), "rx1.txt");    
+    }
   }
   if result_str.contains("S1L") {
-    let intval = &result_str[3..5].parse::<i32>().unwrap();
-    write_file((intval + 1).to_string(), "rx2.txt");
-  }
+    let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
+    if *intval != -1 {
+     write_file((intval + 1).to_string(), "rx2.txt");
+    }  
+}
   if result_str.contains("S2L") {
-    let intval = &result_str[3..5].parse::<i32>().unwrap();
-    write_file((intval + 1).to_string(), "rx3.txt");
+    let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
+    if *intval != -1 {   
+     write_file((intval + 1).to_string(), "rx3.txt");
+    }
   }
 }
 
