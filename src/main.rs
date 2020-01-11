@@ -1,3 +1,4 @@
+use std::i64;
 use std::io::Write;
 use std::net;
 
@@ -28,21 +29,36 @@ fn listen(socket: &net::UdpSocket) {
 
   if result_str.contains("S0L") {
     // zb    sS1L0000000DAF
+    let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
+    if lap_time != -1 {
+      let lap_seconds = (lap_time as f64) / (1000 as f64);
+      write_file(lap_seconds.to_string(), "rx1_laptime.txt");
+    }
     let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
     if *intval != -1 {
-     write_file((intval + 1).to_string(), "rx1.txt");    
+      write_file((intval + 1).to_string(), "rx1.txt");
     }
   }
   if result_str.contains("S1L") {
+    let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
+    if lap_time != -1 {
+      let lap_seconds = (lap_time as f64) / (1000 as f64);
+      write_file(lap_seconds.to_string(), "rx2_laptime.txt");
+    }
     let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
     if *intval != -1 {
-     write_file((intval + 1).to_string(), "rx2.txt");
-    }  
-}
+      write_file((intval + 1).to_string(), "rx2.txt");
+    }
+  }
   if result_str.contains("S2L") {
+    let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
+    if lap_time != -1 {
+      let lap_seconds = (lap_time as f64) / (1000 as f64);
+      write_file(lap_seconds.to_string(), "rx3_laptime.txt");
+    }
     let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
-    if *intval != -1 {   
-     write_file((intval + 1).to_string(), "rx3.txt");
+    if *intval != -1 {
+      write_file((intval + 1).to_string(), "rx3.txt");
     }
   }
 }
@@ -58,6 +74,10 @@ fn main() {
   write_file("0".to_string(), "rx1.txt");
   write_file("0".to_string(), "rx2.txt");
   write_file("0".to_string(), "rx3.txt");
+
+  write_file("-.-".to_string(), "rx1_laptime.txt");
+  write_file("-.-".to_string(), "rx2_laptime.txt");
+  write_file("-.-".to_string(), "rx3_laptime.txt");
 
   let socket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host socket"); // local bind port
 
