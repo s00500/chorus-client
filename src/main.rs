@@ -8,20 +8,22 @@ use std::i64;
 use std::io;
 use std::io::Write;
 use std::net;
+use std::net::SocketAddr;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UdpSocket;
 use tokio_tungstenite::connect_async;
 use tungstenite::protocol::Message;
 use url::Url;
 
-async fn listen(senddata: futures::channel::mpsc::UnboundedReceiver<String>) {
+async fn listen(senddata: futures::channel::mpsc::UnboundedSender<Message>) {
   // Setup the UDP Socket
-  let udpsocket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host udp socket"); // local bind port
+  let mut now = Instant::now();
+  let mut udpsocket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+  udpsocket.connect("127.0.0.1:9000").await.unwrap();
 
   let msg = String::from("ok").into_bytes();
-  udpsocket
-    .send_to(&msg, "127.0.0.1:9000")
-    .expect("cannot send");
+  udpsocket.send(&msg).await.unwrap();
 
   loop {
     // Handle Sending part
@@ -34,18 +36,23 @@ async fn listen(senddata: futures::channel::mpsc::UnboundedReceiver<String>) {
     // -------------
     let mut buf: [u8; 20] = [0; 20];
     let mut result: Vec<u8> = Vec::new();
-    match udpsocket.recv_from(&mut buf).await {
-      Ok((number_of_bytes, _)) => {
-        result = Vec::from(&buf[0..number_of_bytes]);
-      }
-      Err(e) => println!("failed listening {:?}", e),
-    }
+    let len = udpsocket.recv(&mut buf).await.unwrap();
+    result = Vec::from(&buf[0..len]);
 
     let display_result = result.clone();
     let result_str = String::from_utf8(display_result).unwrap();
     println!("received message: {:?}", result_str);
 
     if result_str.contains("S0R1") {
+      //senddata.unbounded_send("RaceStart".to_string()).unwrap();
+
+      let source_id = "LAPTIME";
+      let request = json!({"request-type":"SetTextFreetype2Properties", "source":source_id,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
+      now = Instant::now();
+      senddata
+        .unbounded_send(Message::Text(request.to_string()))
+        .unwrap();
+
       write_file("Race active".to_string(), "racestate.txt");
       write_file("0".to_string(), "rx1.txt");
       write_file("0".to_string(), "rx2.txt");
@@ -156,10 +163,6 @@ async fn main() {
   write_file("-.-".to_string(), "rx3_laptime.txt");
 
   // Setup websocket for OBS
-  let mut now = Instant::now();
-
-  let source_id = "LAPTIME";
-
   let (ws_stream, _) = connect_async(Url::parse("ws://localhost:4444/").unwrap())
     .await
     .expect("Could not connect to OBS");
@@ -167,7 +170,7 @@ async fn main() {
 
   let (write, read) = ws_stream.split();
   let (obstx, obsrx) = futures::channel::mpsc::unbounded();
-  let (udpsockettx, udpsocketrx) = futures::channel::mpsc::unbounded();
+  //let (udpsockettx, udpsocketrx) = futures::channel::mpsc::unbounded();
 
   let ws_to_stdout = {
     read.for_each(|message| {
@@ -183,7 +186,7 @@ async fn main() {
 
   pin_mut!(programm_to_ws, ws_to_stdout);
 
-  tokio::spawn(listen(udpsocketrx));
+  tokio::spawn(listen(obstx));
 
   println!("Will wait now");
   future::select(programm_to_ws, ws_to_stdout).await;
