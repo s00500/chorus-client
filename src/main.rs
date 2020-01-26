@@ -1,6 +1,7 @@
 extern crate clap;
 
 use clap::{App, Arg};
+use futures::{future, pin_mut, StreamExt};
 use rand::random;
 use serde_json::json;
 use std::i64;
@@ -9,7 +10,9 @@ use std::io::Write;
 use std::net;
 use std::thread::spawn;
 use std::time::Instant;
-use tungstenite::{connect, Error, Message};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_tungstenite::connect_async;
+use tungstenite::protocol::Message;
 use url::Url;
 
 fn listen(socket: &net::UdpSocket) {
@@ -81,7 +84,8 @@ fn write_file(text: String, filename: &str) {
   //println!("data written to file");
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
   let matches = App::new("chorusOBSsync")
     .version("1.0")
     .author("Lukas B. <lukas@lbsfilm.at>")
@@ -140,20 +144,33 @@ fn main() {
   // Setup websocket for OBS
   let mut now = Instant::now();
 
-  let (mut obssocket, _) =
-    connect(Url::parse("ws://localhost:4444/").unwrap()).expect("Could not connect to OBS");
   let source_id = "LAPTIME";
 
-  spawn(move || loop {
-    if let Ok(msg) = obssocket.read_message() {
-      let text = msg.into_text().unwrap_or("".to_string());
-      println!("{}", text);
-    }
-  });
+  let (ws_stream, _) = connect_async(Url::parse("ws://localhost:4444/").unwrap())
+    .await
+    .expect("Could not connect to OBS");
+  println!("WebSocket handshake has been successfully completed");
+
+  let (write, read) = ws_stream.split();
+  let (obstx, obsrx) = futures::channel::mpsc::unbounded();
+
+  let ws_to_stdout = {
+    read.for_each(|message| {
+      async {
+        let data = message.unwrap().into_data();
+        tokio::io::stdout().write_all(&data).await.unwrap();
+      }
+    })
+  };
+
+  let stdin_to_ws = obsrx.map(Ok).forward(write);
+  pin_mut!(stdin_to_ws, ws_to_stdout);
+  future::select(stdin_to_ws, ws_to_stdout).await;
 
   // Setup the UDP Socket
   let udpsocket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host udp socket"); // local bind port
   udpsocket.set_nonblocking(true).unwrap();
+
   let msg = String::from("ok").into_bytes();
   udpsocket
     .send_to(&msg, "192.168.0.141:9000")
@@ -163,8 +180,8 @@ fn main() {
 
     if now.elapsed().as_secs() >= 5 {
       let request = json!({"request-type":"SetTextFreetype2Properties", "source":source_id,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
-      obssocket
-        .write_message(Message::Text(request.to_string()))
+      obstx
+        .unbounded_send(Message::Text(request.to_string()))
         .unwrap();
       println!("{}", now.elapsed().as_secs());
       now = Instant::now();
