@@ -7,10 +7,9 @@ use std::i64;
 use std::io;
 use std::io::Write;
 use std::net;
-use std::thread;
-use std::thread::sleep;
-use std::time::{Duration, Instant};
-use tungstenite::{connect, Error, Message, Result};
+use std::thread::spawn;
+use std::time::Instant;
+use tungstenite::{connect, Error, Message};
 use url::Url;
 
 fn listen(socket: &net::UdpSocket) {
@@ -145,22 +144,22 @@ fn main() {
     connect(Url::parse("ws://localhost:4444/").unwrap()).expect("Could not connect to OBS");
   let source_id = "LAPTIME";
 
-  // Setup the UDP Socket
-  let udpsocket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host udp socket"); // local bind port
-  udpsocket.set_nonblocking(true).unwrap();
-
-  let msg = String::from("ok").into_bytes();
-  udpsocket
-    .send_to(&msg, "192.168.0.141:9000")
-    .expect("cannot send");
-
-  loop {
-    listen(&udpsocket);
-
+  spawn(move || loop {
     if let Ok(msg) = obssocket.read_message() {
       let text = msg.into_text().unwrap_or("".to_string());
       println!("{}", text);
     }
+  });
+
+  // Setup the UDP Socket
+  let udpsocket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host udp socket"); // local bind port
+  udpsocket.set_nonblocking(true).unwrap();
+  let msg = String::from("ok").into_bytes();
+  udpsocket
+    .send_to(&msg, "192.168.0.141:9000")
+    .expect("cannot send");
+  loop {
+    listen(&udpsocket);
 
     if now.elapsed().as_secs() >= 5 {
       let request = json!({"request-type":"SetTextFreetype2Properties", "source":source_id,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
