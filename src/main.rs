@@ -8,72 +8,86 @@ use std::i64;
 use std::io;
 use std::io::Write;
 use std::net;
-use std::thread::spawn;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::connect_async;
 use tungstenite::protocol::Message;
 use url::Url;
 
-fn listen(socket: &net::UdpSocket) {
-  let mut buf: [u8; 20] = [0; 20];
-  let mut result: Vec<u8> = Vec::new();
-  match socket.recv_from(&mut buf) {
-    Ok((number_of_bytes, _)) => {
-      result = Vec::from(&buf[0..number_of_bytes]);
-    }
-    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-      return ();
-    }
-    Err(e) => println!("failed listening {:?}", e),
-  }
+async fn listen(senddata: futures::channel::mpsc::UnboundedReceiver<String>) {
+  // Setup the UDP Socket
+  let udpsocket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host udp socket"); // local bind port
 
-  let display_result = result.clone();
-  let result_str = String::from_utf8(display_result).unwrap();
-  println!("received message: {:?}", result_str);
+  let msg = String::from("ok").into_bytes();
+  udpsocket
+    .send_to(&msg, "127.0.0.1:9000")
+    .expect("cannot send");
 
-  if result_str.contains("S0R1") {
-    write_file("Race active".to_string(), "racestate.txt");
-    write_file("0".to_string(), "rx1.txt");
-    write_file("0".to_string(), "rx2.txt");
-    write_file("0".to_string(), "rx3.txt");
-  }
-  if result_str.contains("S0R0") {
-    write_file("Race inactive".to_string(), "racestate.txt");
-  }
+  loop {
+    // Handle Sending part
+    //senddata
+    /*
+    let msg = String::from("ok").into_bytes();
+    udpsocket
+      .send_to(&msg, "192.168.0.141:9000")
+      .expect("cannot send");*/
+    // -------------
+    let mut buf: [u8; 20] = [0; 20];
+    let mut result: Vec<u8> = Vec::new();
+    match udpsocket.recv_from(&mut buf).await {
+      Ok((number_of_bytes, _)) => {
+        result = Vec::from(&buf[0..number_of_bytes]);
+      }
+      Err(e) => println!("failed listening {:?}", e),
+    }
 
-  if result_str.contains("S0L") {
-    // zb    sS1L0000000DAF
-    let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
-    if lap_time != -1 {
-      let lap_seconds = (lap_time as f64) / (1000 as f64);
-      write_file(lap_seconds.to_string(), "rx1_laptime.txt");
+    let display_result = result.clone();
+    let result_str = String::from_utf8(display_result).unwrap();
+    println!("received message: {:?}", result_str);
+
+    if result_str.contains("S0R1") {
+      write_file("Race active".to_string(), "racestate.txt");
+      write_file("0".to_string(), "rx1.txt");
+      write_file("0".to_string(), "rx2.txt");
+      write_file("0".to_string(), "rx3.txt");
     }
-    let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
-    if *intval != -1 {
-      write_file((intval + 1).to_string(), "rx1.txt");
+    if result_str.contains("S0R0") {
+      write_file("Race inactive".to_string(), "racestate.txt");
     }
-  }
-  if result_str.contains("S1L") {
-    let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
-    if lap_time != -1 {
-      let lap_seconds = (lap_time as f64) / (1000 as f64);
-      write_file(lap_seconds.to_string(), "rx2_laptime.txt");
+
+    if result_str.contains("S0L") {
+      // zb    sS1L0000000DAF
+      let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
+      if lap_time != -1 {
+        let lap_seconds = (lap_time as f64) / (1000 as f64);
+        write_file(lap_seconds.to_string(), "rx1_laptime.txt");
+      }
+      let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
+      if *intval != -1 {
+        write_file((intval + 1).to_string(), "rx1.txt");
+      }
     }
-    let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
-    if *intval != -1 {
-      write_file((intval + 1).to_string(), "rx2.txt");
+    if result_str.contains("S1L") {
+      let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
+      if lap_time != -1 {
+        let lap_seconds = (lap_time as f64) / (1000 as f64);
+        write_file(lap_seconds.to_string(), "rx2_laptime.txt");
+      }
+      let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
+      if *intval != -1 {
+        write_file((intval + 1).to_string(), "rx2.txt");
+      }
     }
-  }
-  if result_str.contains("S2L") {
-    let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
-    if lap_time != -1 {
-      let lap_seconds = (lap_time as f64) / (1000 as f64);
-      write_file(lap_seconds.to_string(), "rx3_laptime.txt");
-    }
-    let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
-    if *intval != -1 {
-      write_file((intval + 1).to_string(), "rx3.txt");
+    if result_str.contains("S2L") {
+      let lap_time = i64::from_str_radix(&result_str[5..13], 16).unwrap_or(-1);
+      if lap_time != -1 {
+        let lap_seconds = (lap_time as f64) / (1000 as f64);
+        write_file(lap_seconds.to_string(), "rx3_laptime.txt");
+      }
+      let intval = &result_str[3..5].parse::<i32>().unwrap_or(-1);
+      if *intval != -1 {
+        write_file((intval + 1).to_string(), "rx3.txt");
+      }
     }
   }
 }
@@ -153,31 +167,29 @@ async fn main() {
 
   let (write, read) = ws_stream.split();
   let (obstx, obsrx) = futures::channel::mpsc::unbounded();
+  let (udpsockettx, udpsocketrx) = futures::channel::mpsc::unbounded();
 
   let ws_to_stdout = {
     read.for_each(|message| {
       async {
         let data = message.unwrap().into_data();
+        println!("Messg");
         tokio::io::stdout().write_all(&data).await.unwrap();
       }
     })
   };
 
-  let stdin_to_ws = obsrx.map(Ok).forward(write);
-  pin_mut!(stdin_to_ws, ws_to_stdout);
-  future::select(stdin_to_ws, ws_to_stdout).await;
+  let programm_to_ws = obsrx.map(Ok).forward(write);
 
-  // Setup the UDP Socket
-  let udpsocket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host udp socket"); // local bind port
-  udpsocket.set_nonblocking(true).unwrap();
+  pin_mut!(programm_to_ws, ws_to_stdout);
 
-  let msg = String::from("ok").into_bytes();
-  udpsocket
-    .send_to(&msg, "192.168.0.141:9000")
-    .expect("cannot send");
+  tokio::spawn(listen(udpsocketrx));
+
+  println!("Will wait now");
+  future::select(programm_to_ws, ws_to_stdout).await;
+
+  /*
   loop {
-    listen(&udpsocket);
-
     if now.elapsed().as_secs() >= 5 {
       let request = json!({"request-type":"SetTextFreetype2Properties", "source":source_id,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
       obstx
@@ -187,4 +199,5 @@ async fn main() {
       now = Instant::now();
     }
   }
+  */
 }
