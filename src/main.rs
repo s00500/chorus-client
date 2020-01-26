@@ -1,16 +1,29 @@
+extern crate clap;
+
+use clap::{App, Arg};
+use rand::random;
+use serde_json::json;
 use std::i64;
+use std::io;
 use std::io::Write;
 use std::net;
+use std::thread;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
+use tungstenite::{connect, Error, Message, Result};
+use url::Url;
 
 fn listen(socket: &net::UdpSocket) {
   let mut buf: [u8; 20] = [0; 20];
-  let number_of_bytes: usize = 0;
   let mut result: Vec<u8> = Vec::new();
   match socket.recv_from(&mut buf) {
     Ok((number_of_bytes, _)) => {
       result = Vec::from(&buf[0..number_of_bytes]);
     }
-    Err(fail) => println!("failed listening {:?}", fail),
+    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+      return ();
+    }
+    Err(e) => println!("failed listening {:?}", e),
   }
 
   let display_result = result.clone();
@@ -70,6 +83,52 @@ fn write_file(text: String, filename: &str) {
 }
 
 fn main() {
+  let matches = App::new("chorusOBSsync")
+    .version("1.0")
+    .author("Lukas B. <lukas@lbsfilm.at>")
+    .about("Get data from the CHorus32 Laptimer Project and use it to control OBS")
+    .arg(
+      Arg::with_name("config")
+        .short("c")
+        .long("config")
+        .value_name("FILE")
+        .help("Sets a custom config file")
+        .takes_value(true),
+    )
+    .arg(
+      Arg::with_name("INPUT")
+        .help("Sets the input file to use")
+        .required(false)
+        .index(1),
+    )
+    .arg(
+      Arg::with_name("v")
+        .short("v")
+        .multiple(true)
+        .help("Sets the level of verbosity"),
+    )
+    .get_matches();
+
+  // Gets a value for config if supplied by user, or defaults to "default.conf"
+  let config = matches.value_of("config").unwrap_or("default.conf");
+  println!("Value for config: {}", config);
+
+  // Calling .unwrap() is safe here because "INPUT" is required (if "INPUT" wasn't
+  // required we could have used an 'if let' to conditionally get the value)
+  if let Some(input) = matches.value_of("INPUT") {
+    println!("Using input file: {}", input);
+  }
+
+  // Vary the output based on how many times the user used the "verbose" flag
+  // (i.e. 'myprog -v -v -v' or 'myprog -vvv' vs 'myprog -v'
+  match matches.occurrences_of("v") {
+    0 => println!("No verbose info"),
+    1 => println!("Some verbose info"),
+    2 => println!("Tons of verbose info"),
+    3 | _ => println!("Don't be crazy"),
+  }
+
+  //////////----------------
   write_file("Race inactive".to_string(), "racestate.txt");
   write_file("0".to_string(), "rx1.txt");
   write_file("0".to_string(), "rx2.txt");
@@ -79,15 +138,37 @@ fn main() {
   write_file("-.-".to_string(), "rx2_laptime.txt");
   write_file("-.-".to_string(), "rx3_laptime.txt");
 
-  let socket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host socket"); // local bind port
+  // Setup websocket for OBS
+  let mut now = Instant::now();
+
+  let (mut obssocket, _) =
+    connect(Url::parse("ws://localhost:4444/").unwrap()).expect("Could not connect to OBS");
+  let source_id = "LAPTIME";
+
+  // Setup the UDP Socket
+  let udpsocket = net::UdpSocket::bind("0.0.0.0:0").expect("failed to bind host udp socket"); // local bind port
+  udpsocket.set_nonblocking(true).unwrap();
 
   let msg = String::from("ok").into_bytes();
-
-  socket
+  udpsocket
     .send_to(&msg, "192.168.0.141:9000")
     .expect("cannot send");
 
   loop {
-    listen(&socket); // this call is blockig
+    listen(&udpsocket);
+
+    if let Ok(msg) = obssocket.read_message() {
+      let text = msg.into_text().unwrap_or("".to_string());
+      println!("{}", text);
+    }
+
+    if now.elapsed().as_secs() >= 5 {
+      let request = json!({"request-type":"SetTextFreetype2Properties", "source":source_id,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
+      obssocket
+        .write_message(Message::Text(request.to_string()))
+        .unwrap();
+      println!("{}", now.elapsed().as_secs());
+      now = Instant::now();
+    }
   }
 }
