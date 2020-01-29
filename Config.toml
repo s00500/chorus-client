@@ -1,16 +1,7 @@
-[LapCountScenes]
-RX1 = "RX1LAP"
-RX2 = "RX2LAP"
-RX3 = "RX3LAP"
-RX4 = ""
-RX5 = ""
-RX6 = ""
+filemode = false
+rssi_threshold = 100
 
-[LapTimeScenes]
-RX1 = ""
-RX2 = ""
-RX3 = ""
-RX4 = ""
-RX5 = ""
-RX6 = ""
+video_sources = [ "RX1", "RX2", "RX3" ]
+lap_sources = [ "RX1Lap", "RX2Lap", "RX3Lap" ]
+laptime_sources = [ "RX1LapTime", "RX2LapTime", "RX3LapTime" ]
 
