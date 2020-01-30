@@ -9,6 +9,8 @@ use std::io::Write;
 use serde_derive::Deserialize;
 use std::fs::File;
 use std::io::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::net::udp::SendHalf;
@@ -21,6 +23,8 @@ use url::Url;
 struct Conf {
   filemode: bool,
   rssi_threshold: i32,
+  race_status_source: String,
+  race_time_source: String,
 
   video_sources: Vec<String>,
   lap_sources: Vec<String>,
@@ -31,6 +35,26 @@ async fn rssi_timer(udpchanneltx: futures::channel::mpsc::UnboundedSender<String
   loop {
     Delay::new(Duration::from_secs(1)).await;
     udpchanneltx.unbounded_send("S0r\n".to_string()).unwrap();
+  }
+}
+
+async fn race_timer(
+  wschannel: futures::channel::mpsc::UnboundedSender<Message>,
+  source: String,
+  race_timer_state: Arc<AtomicBool>,
+) {
+  loop {
+    Delay::new(Duration::from_millis(100)).await;
+    let now = Instant::now();
+    while race_timer_state.load(Ordering::Relaxed) {
+      Delay::new(Duration::from_millis(200)).await;
+      let request = json!({"request-type":"SetTextFreetype2Properties", "source":source,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
+      wschannel
+        .unbounded_send(Message::Text(request.to_string()))
+        .unwrap_or_else(|err| {
+          eprintln!("Could not send to OBS: {}", err);
+        });
+    }
   }
 }
 
@@ -47,11 +71,12 @@ async fn programm_to_udp(
 
 async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSender<Message>) {
   let mut drone_active = vec![false, false, false, false, false, false]; // There ia a maximum os 6 receivers
-
+  let race_timer_state = Arc::new(AtomicBool::new(false));
+  let race_timer_state_clone = race_timer_state.clone();
   // Setup the UDP Socket
   let mut udpsocket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
   udpsocket
-    .connect("192.168.0.141:9000")
+    .connect("127.0.0.1:9000") //192.168.0.141
     .await
     .expect("could not connect to udp ");
 
@@ -63,6 +88,11 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
   let (udpchanneltx, udpchannelrx) = futures::channel::mpsc::unbounded();
   tokio::spawn(programm_to_udp(udpchannelrx, udptx));
   tokio::spawn(rssi_timer(udpchanneltx.clone()));
+  tokio::spawn(race_timer(
+    senddata.clone(),
+    appconf.race_time_source.clone(),
+    race_timer_state_clone,
+  ));
 
   loop {
     let mut buf: [u8; 500] = [0; 500];
@@ -73,25 +103,34 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
     let result_str = String::from_utf8(display_result).unwrap();
 
     if result_str.contains("S0R1") {
-      /*
-      TODO: We should start the racecounter here
-      let source_id = "LAPTIME";
-      let request = json!({"request-type":"SetTextFreetype2Properties", "source":appconf.la,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
-      now = Instant::now();
-            senddata
-        .unbounded_send(Message::Text(request.to_string()))
-        .unwrap();
-      */
+      race_timer_state_my.store(true, Ordering::Relaxed);
+      println!("Set race bool");
       if appconf.filemode {
         write_file("Race active".to_string(), "racestate.txt");
         write_file("0".to_string(), "rx1.txt");
         write_file("0".to_string(), "rx2.txt");
         write_file("0".to_string(), "rx3.txt");
       }
+    /*
+    set_obs_text(
+      &senddata,
+      &appconf.race_status_source,
+      &"Race inactive".to_string(),
+    );
+    for i in 0..2 {
+      set_obs_text(&senddata, &appconf.lap_sources[i], &"0".to_string());
+    }
+    */
     } else if result_str.contains("S0R0") {
+      race_timer_state_my.store(false, Ordering::Relaxed);
       if appconf.filemode {
         write_file("Race inactive".to_string(), "racestate.txt");
       }
+      set_obs_text(
+        &senddata,
+        &appconf.race_status_source,
+        &"Race inactive".to_string(),
+      );
     } else if result_str.contains("S0r") {
       //S0r004A\nS1r0044\nS2r0044
       let rxes = result_str.split("\n");
@@ -133,16 +172,21 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         if appconf.filemode {
           write_file(lap_seconds.to_string(), "rx1_laptime.txt");
         }
-        // TODO: LapTime  to OBS!
+        set_obs_text(
+          &senddata,
+          &appconf.laptime_sources[0],
+          &lap_seconds.to_string(),
+        );
       }
       if let Ok(intval) = &result_str[3..5].parse::<i32>() {
         if appconf.filemode {
           write_file((intval + 1).to_string(), "rx1.txt");
         }
-        let request = json!({"request-type":"SetTextFreetype2Properties", "source":appconf.lap_sources[0],"message-id": random::<f64>().to_string(), "text": (intval + 1).to_string() });
-        senddata
-          .unbounded_send(Message::Text(request.to_string()))
-          .unwrap();
+        set_obs_text(
+          &senddata,
+          &appconf.lap_sources[0],
+          &(intval + 1).to_string(),
+        );
       }
     } else if result_str.contains("S1L") {
       if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
@@ -150,16 +194,22 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         if appconf.filemode {
           write_file(lap_seconds.to_string(), "rx2_laptime.txt");
         }
+        set_obs_text(
+          &senddata,
+          &appconf.laptime_sources[1],
+          &lap_seconds.to_string(),
+        );
       }
 
       if let Ok(intval) = &result_str[3..5].parse::<i32>() {
         if appconf.filemode {
           write_file((intval + 1).to_string(), "rx2.txt");
         }
-        let request = json!({"request-type":"SetTextFreetype2Properties", "source":appconf.lap_sources[1],"message-id": random::<f64>().to_string(), "text": (intval + 1).to_string() });
-        senddata
-          .unbounded_send(Message::Text(request.to_string()))
-          .unwrap();
+        set_obs_text(
+          &senddata,
+          &appconf.lap_sources[1],
+          &(intval + 1).to_string(),
+        );
       }
     } else if result_str.contains("S2L") {
       if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
@@ -167,16 +217,22 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         if appconf.filemode {
           write_file(lap_seconds.to_string(), "rx3_laptime.txt");
         }
+        set_obs_text(
+          &senddata,
+          &appconf.laptime_sources[2],
+          &lap_seconds.to_string(),
+        );
       }
 
       if let Ok(intval) = &result_str[3..5].parse::<i32>() {
         if appconf.filemode {
           write_file((intval + 1).to_string(), "rx3.txt");
         }
-        let request = json!({"request-type":"SetTextFreetype2Properties", "source":appconf.lap_sources[2],"message-id": random::<f64>().to_string(), "text": (intval + 1).to_string() });
-        senddata
-          .unbounded_send(Message::Text(request.to_string()))
-          .unwrap();
+        set_obs_text(
+          &senddata,
+          &appconf.lap_sources[2],
+          &(intval + 1).to_string(),
+        );
       }
     } else {
       println!("Received unknown message from Chorus: {:?}", result_str);
@@ -291,4 +347,17 @@ async fn main() {
 
   println!("Programm initialized!");
   udp_comm(&appconf, obstx).await;
+}
+
+fn set_obs_text(
+  wschannel: &futures::channel::mpsc::UnboundedSender<Message>,
+  source: &String,
+  text: &String,
+) {
+  let request = json!({"request-type":"SetTextFreetype2Properties", "source":source,"message-id": random::<f64>().to_string(), "text": text });
+  wschannel
+    .unbounded_send(Message::Text(request.to_string()))
+    .unwrap_or_else(|err| {
+      eprintln!("Could not send to OBS: {}", err);
+    });
 }

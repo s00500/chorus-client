@@ -4,4 +4,6 @@ rssi_threshold = 100
 video_sources = [ "RX1", "RX2", "RX3" ]
 lap_sources = [ "RX1Lap", "RX2Lap", "RX3Lap" ]
 laptime_sources = [ "RX1LapTime", "RX2LapTime", "RX3LapTime" ]
+race_status_source = "RaceStatus"
+race_time_source = "RaceTime"
 
