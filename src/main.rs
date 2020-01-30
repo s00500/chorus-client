@@ -103,7 +103,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
     let result_str = String::from_utf8(display_result).unwrap();
 
     if result_str.contains("S0R1") {
-      race_timer_state_my.store(true, Ordering::Relaxed);
+      race_timer_state.store(true, Ordering::Relaxed);
       println!("Set race bool");
       if appconf.filemode {
         write_file("Race active".to_string(), "racestate.txt");
@@ -111,18 +111,16 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         write_file("0".to_string(), "rx2.txt");
         write_file("0".to_string(), "rx3.txt");
       }
-    /*
-    set_obs_text(
-      &senddata,
-      &appconf.race_status_source,
-      &"Race inactive".to_string(),
-    );
-    for i in 0..2 {
-      set_obs_text(&senddata, &appconf.lap_sources[i], &"0".to_string());
-    }
-    */
+      set_obs_text(
+        &senddata,
+        &appconf.race_status_source,
+        &"Race inactive".to_string(),
+      );
+      for i in 0..2 {
+        set_obs_text(&senddata, &appconf.lap_sources[i], &"0".to_string());
+      }
     } else if result_str.contains("S0R0") {
-      race_timer_state_my.store(false, Ordering::Relaxed);
+      race_timer_state.store(false, Ordering::Relaxed);
       if appconf.filemode {
         write_file("Race inactive".to_string(), "racestate.txt");
       }
