@@ -1,9 +1,15 @@
 filemode = false
-rssi_threshold = 100
+rssi_threshold = 80
+enable_websocket = true
 
+obs_websocket_url = "ws://localhost:4444/"
+chorus_udp_url = "192.168.0.141:9000"
+# chorus_udp_url = "127.0.0.1:9000" # local test with nc
+
+obs_mask_filter_name = "mask"
 video_sources = [ "RX1", "RX2", "RX3" ]
 lap_sources = [ "RX1Lap", "RX2Lap", "RX3Lap" ]
 laptime_sources = [ "RX1LapTime", "RX2LapTime", "RX3LapTime" ]
 race_status_source = "RaceStatus"
-race_time_source = "RaceTime"
+#race_time_source = "RaceTime"
 
