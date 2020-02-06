@@ -1,8 +1,6 @@
 use clap::{App, Arg};
 use futures::StreamExt;
 use futures_timer::Delay;
-use rand::random;
-use serde_json::json;
 use std::i64;
 use std::io::Write;
 
@@ -49,26 +47,6 @@ async fn rssi_timer(udpchanneltx: futures::channel::mpsc::UnboundedSender<String
   }
 }
 
-async fn race_timer(
-  wschannel: futures::channel::mpsc::UnboundedSender<Message>,
-  source: String,
-  race_timer_state: Arc<AtomicBool>,
-) {
-  loop {
-    Delay::new(Duration::from_millis(100)).await;
-    let now = Instant::now();
-    while race_timer_state.load(Ordering::Relaxed) {
-      Delay::new(Duration::from_millis(200)).await;
-      let request = json!({"request-type":"SetTextFreetype2Properties", "source":source,"message-id": random::<f64>().to_string(), "text": now.elapsed().as_millis().to_string() });
-      wschannel
-        .unbounded_send(Message::Text(request.to_string()))
-        .unwrap_or_else(|err| {
-          eprintln!("Could not send to OBS: {}", err);
-        });
-    }
-  }
-}
-
 async fn programm_to_udp(
   mut udpchannelrx: futures::channel::mpsc::UnboundedReceiver<String>,
   mut udptx: SendHalf,
@@ -112,7 +90,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
   tokio::spawn(rssi_timer(udpchanneltx.clone()));
 
   if let Some(race_time_source) = &appconf.race_time_source {
-    tokio::spawn(race_timer(
+    tokio::spawn(obsws::race_timer(
       senddata.clone(),
       race_time_source.clone(),
       race_timer_state_clone,
@@ -174,7 +152,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
           // Drone is disconnected
           if drone_active[index] {
             // Send filter on
-            if &appconf.video_sources.len() > &index {
+            if &appconf.video_sources.len() <= &index {
               obsws::set_mask(
                 &senddata,
                 &appconf.video_sources[index],
@@ -211,89 +189,48 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         }
         index = index + 1;
       }
-    } else if result_str.contains("S0L") {
+    } else if result_str.contains("L") {
       // zb    sS1L0000000DAF
-      if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
-        let lap_duration = Duration::from_millis(lap_time as u64);
-        let mut lap_seconds = lap_duration.as_secs();
-        let lap_minutes = lap_seconds / 60;
-        lap_seconds = lap_seconds - lap_minutes * 60;
-        let laptime_string = format!(
-          "{:0<2}:{:0<2}.{:0<3}",
-          lap_minutes,
-          lap_seconds,
-          lap_duration.subsec_millis()
-        );
-        obsws::set_text(&senddata, &appconf.laptime_sources[0], &laptime_string);
-        if appconf.filemode {
-          write_file(laptime_string, "rx1_laptime.txt");
+      // now get the index
+      if let Ok(rx_number) = &result_str[1..2].parse::<i32>() {
+        if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
+          if &appconf.laptime_sources.len() <= &(*rx_number as usize) {
+            eprintln!("No Sourcename provided for RX {} lapduratio", &rx_number);
+            continue;
+          } else {
+            let lap_duration = Duration::from_millis(lap_time as u64);
+            let mut lap_seconds = lap_duration.as_secs();
+            let lap_minutes = lap_seconds / 60;
+            lap_seconds = lap_seconds - lap_minutes * 60;
+            let laptime_string = format!(
+              "{:0<2}:{:0<2}.{:0<3}",
+              lap_minutes,
+              lap_seconds,
+              lap_duration.subsec_millis()
+            );
+            obsws::set_text(&senddata, &appconf.laptime_sources[0], &laptime_string);
+            if appconf.filemode {
+              write_file(laptime_string, &format!("rx{}_laptime.txt", rx_number + 1));
+            }
+          }
         }
-      }
-      if let Ok(intval) = &result_str[3..5].parse::<i32>() {
-        if appconf.filemode {
-          write_file((intval + 1).to_string(), "rx1.txt");
+        if let Ok(lapcount) = &result_str[3..5].parse::<i32>() {
+          if &appconf.lap_sources.len() <= &(*rx_number as usize) {
+            eprintln!("No Sourcename provided for RX {} lapcount", &rx_number);
+            continue;
+          }
+          if appconf.filemode {
+            write_file(
+              (lapcount + 1).to_string(),
+              &format!("rx{}.txt", rx_number + 1),
+            );
+          }
+          obsws::set_text(
+            &senddata,
+            &appconf.lap_sources[(*rx_number as usize)],
+            &(lapcount + 1).to_string(),
+          );
         }
-        obsws::set_text(
-          &senddata,
-          &appconf.lap_sources[0],
-          &(intval + 1).to_string(),
-        );
-      }
-    } else if result_str.contains("S1L") {
-      if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
-        let lap_duration = Duration::from_millis(lap_time as u64);
-        let mut lap_seconds = lap_duration.as_secs();
-        let lap_minutes = lap_seconds / 60;
-        lap_seconds = lap_seconds - lap_minutes * 60;
-        let laptime_string = format!(
-          "{:0<2}:{:0<2}.{:0<3}",
-          lap_minutes,
-          lap_seconds,
-          lap_duration.subsec_millis()
-        );
-        obsws::set_text(&senddata, &appconf.laptime_sources[1], &laptime_string);
-        if appconf.filemode {
-          write_file(laptime_string, "rx2_laptime.txt");
-        }
-      }
-
-      if let Ok(intval) = &result_str[3..5].parse::<i32>() {
-        if appconf.filemode {
-          write_file((intval + 1).to_string(), "rx2.txt");
-        }
-        obsws::set_text(
-          &senddata,
-          &appconf.lap_sources[1],
-          &(intval + 1).to_string(),
-        );
-      }
-    } else if result_str.contains("S2L") {
-      if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
-        let lap_duration = Duration::from_millis(lap_time as u64);
-        let mut lap_seconds = lap_duration.as_secs();
-        let lap_minutes = lap_seconds / 60;
-        lap_seconds = lap_seconds - lap_minutes * 60;
-        let laptime_string = format!(
-          "{:0<2}:{:0<2}.{:0<3}",
-          lap_minutes,
-          lap_seconds,
-          lap_duration.subsec_millis()
-        );
-        obsws::set_text(&senddata, &appconf.laptime_sources[2], &laptime_string);
-        if appconf.filemode {
-          write_file(laptime_string, "rx3_laptime.txt");
-        }
-      }
-
-      if let Ok(intval) = &result_str[3..5].parse::<i32>() {
-        if appconf.filemode {
-          write_file((intval + 1).to_string(), "rx3.txt");
-        }
-        obsws::set_text(
-          &senddata,
-          &appconf.lap_sources[2],
-          &(intval + 1).to_string(),
-        );
       }
     } else {
       println!("Received unknown message from Chorus: {:?}", result_str);
