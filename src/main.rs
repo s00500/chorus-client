@@ -141,6 +141,11 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
       );
       for i in 0..2 {
         set_obs_text(&senddata, &appconf.lap_sources[i], &"0".to_string());
+        set_obs_text(
+          &senddata,
+          &appconf.laptime_sources[i],
+          &"00:00.000".to_string(),
+        );
       }
     } else if result_str.contains("S0R0") {
       race_timer_state.store(false, Ordering::Relaxed);
@@ -195,15 +200,20 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
     } else if result_str.contains("S0L") {
       // zb    sS1L0000000DAF
       if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
-        let lap_seconds = (lap_time as f64) / (1000 as f64);
-        if appconf.filemode {
-          write_file(lap_seconds.to_string(), "rx1_laptime.txt");
-        }
-        set_obs_text(
-          &senddata,
-          &appconf.laptime_sources[0],
-          &lap_seconds.to_string(),
+        let lap_duration = Duration::from_millis(lap_time as u64);
+        let mut lap_seconds = lap_duration.as_secs();
+        let lap_minutes = lap_seconds / 60;
+        lap_seconds = lap_seconds - lap_minutes * 60;
+        let laptime_string = format!(
+          "{:0<2}:{:0<2}.{:0<3}",
+          lap_minutes,
+          lap_seconds,
+          lap_duration.subsec_millis()
         );
+        set_obs_text(&senddata, &appconf.laptime_sources[0], &laptime_string);
+        if appconf.filemode {
+          write_file(laptime_string, "rx1_laptime.txt");
+        }
       }
       if let Ok(intval) = &result_str[3..5].parse::<i32>() {
         if appconf.filemode {
@@ -217,15 +227,20 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
       }
     } else if result_str.contains("S1L") {
       if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
-        let lap_seconds = (lap_time as f64) / (1000 as f64);
-        if appconf.filemode {
-          write_file(lap_seconds.to_string(), "rx2_laptime.txt");
-        }
-        set_obs_text(
-          &senddata,
-          &appconf.laptime_sources[1],
-          &lap_seconds.to_string(),
+        let lap_duration = Duration::from_millis(lap_time as u64);
+        let mut lap_seconds = lap_duration.as_secs();
+        let lap_minutes = lap_seconds / 60;
+        lap_seconds = lap_seconds - lap_minutes * 60;
+        let laptime_string = format!(
+          "{:0<2}:{:0<2}.{:0<3}",
+          lap_minutes,
+          lap_seconds,
+          lap_duration.subsec_millis()
         );
+        set_obs_text(&senddata, &appconf.laptime_sources[1], &laptime_string);
+        if appconf.filemode {
+          write_file(laptime_string, "rx2_laptime.txt");
+        }
       }
 
       if let Ok(intval) = &result_str[3..5].parse::<i32>() {
@@ -240,15 +255,20 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
       }
     } else if result_str.contains("S2L") {
       if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
-        let lap_seconds = (lap_time as f64) / (1000 as f64);
-        if appconf.filemode {
-          write_file(lap_seconds.to_string(), "rx3_laptime.txt");
-        }
-        set_obs_text(
-          &senddata,
-          &appconf.laptime_sources[2],
-          &lap_seconds.to_string(),
+        let lap_duration = Duration::from_millis(lap_time as u64);
+        let mut lap_seconds = lap_duration.as_secs();
+        let lap_minutes = lap_seconds / 60;
+        lap_seconds = lap_seconds - lap_minutes * 60;
+        let laptime_string = format!(
+          "{:0<2}:{:0<2}.{:0<3}",
+          lap_minutes,
+          lap_seconds,
+          lap_duration.subsec_millis()
         );
+        set_obs_text(&senddata, &appconf.laptime_sources[2], &laptime_string);
+        if appconf.filemode {
+          write_file(laptime_string, "rx3_laptime.txt");
+        }
       }
 
       if let Ok(intval) = &result_str[3..5].parse::<i32>() {
@@ -362,7 +382,6 @@ async fn main() {
     ws_read.for_each(|message| {
       async {
         let data = message.unwrap().into_data();
-        // TODO: Parse errors here and filter the rest
 
         let data_string = match std::str::from_utf8(&data) {
           Ok(v) => v,

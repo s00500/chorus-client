@@ -1,6 +1,6 @@
 filemode = false
-rssi_threshold = 80
 enable_websocket = true
+rssi_threshold = 80
 
 obs_websocket_url = "ws://localhost:4444/"
 chorus_udp_url = "192.168.0.141:9000"
