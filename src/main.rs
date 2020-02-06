@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 //use tokio::io::AsyncWriteExt;
 use tokio::net::udp::SendHalf;
 use tokio::net::UdpSocket;
@@ -99,7 +99,10 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
 
   loop {
     let mut buf: [u8; 500] = [0; 500];
-    let len = udprx.recv(&mut buf).await.unwrap();
+    let len = udprx.recv(&mut buf).await.unwrap_or_else(|err| {
+      eprintln!("Could not receive from Chorus: {}", err);
+      return 0;
+    });
     let result = Vec::from(&buf[0..len]);
 
     let display_result = result.clone();
@@ -119,7 +122,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         &appconf.race_status_source,
         &"Race active".to_string(),
       );
-      for i in 0..2 {
+      for i in 0..3 {
         obsws::set_text(&senddata, &appconf.lap_sources[i], &"0".to_string());
         obsws::set_text(
           &senddata,
@@ -152,7 +155,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
           // Drone is disconnected
           if drone_active[index] {
             // Send filter on
-            if &appconf.video_sources.len() <= &index {
+            if &appconf.video_sources.len() > &index {
               obsws::set_mask(
                 &senddata,
                 &appconf.video_sources[index],
@@ -195,7 +198,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
       if let Ok(rx_number) = &result_str[1..2].parse::<i32>() {
         if let Ok(lap_time) = i64::from_str_radix(&result_str[5..13], 16) {
           if &appconf.laptime_sources.len() <= &(*rx_number as usize) {
-            eprintln!("No Sourcename provided for RX {} lapduratio", &rx_number);
+            eprintln!("No Sourcename provided for RX {} lapduration", &rx_number);
             continue;
           } else {
             let lap_duration = Duration::from_millis(lap_time as u64);
@@ -208,7 +211,11 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
               lap_seconds,
               lap_duration.subsec_millis()
             );
-            obsws::set_text(&senddata, &appconf.laptime_sources[0], &laptime_string);
+            obsws::set_text(
+              &senddata,
+              &appconf.laptime_sources[(*rx_number as usize)],
+              &laptime_string,
+            );
             if appconf.filemode {
               write_file(laptime_string, &format!("rx{}_laptime.txt", rx_number + 1));
             }
@@ -262,12 +269,6 @@ async fn main() {
         .short("v")
         .multiple(true)
         .help("Sets the level of verbosity"),
-    )
-    .arg(
-      Arg::with_name("filemode")
-        .short("F")
-        .multiple(false)
-        .help("Enables File Mode"),
     )
     .get_matches();
 
