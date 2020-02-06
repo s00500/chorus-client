@@ -19,6 +19,8 @@ use tokio_tungstenite::connect_async;
 use tungstenite::protocol::Message;
 use url::Url;
 
+mod obsws;
+
 #[derive(Debug, Deserialize)]
 struct Conf {
   filemode: bool,
@@ -134,14 +136,14 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         write_file("0".to_string(), "rx2.txt");
         write_file("0".to_string(), "rx3.txt");
       }
-      set_obs_text(
+      obsws::set_text(
         &senddata,
         &appconf.race_status_source,
         &"Race active".to_string(),
       );
       for i in 0..2 {
-        set_obs_text(&senddata, &appconf.lap_sources[i], &"0".to_string());
-        set_obs_text(
+        obsws::set_text(&senddata, &appconf.lap_sources[i], &"0".to_string());
+        obsws::set_text(
           &senddata,
           &appconf.laptime_sources[i],
           &"00:00.000".to_string(),
@@ -152,7 +154,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
       if appconf.filemode {
         write_file("Race inactive".to_string(), "racestate.txt");
       }
-      set_obs_text(
+      obsws::set_text(
         &senddata,
         &appconf.race_status_source,
         &"Race inactive".to_string(),
@@ -172,26 +174,38 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
           // Drone is disconnected
           if drone_active[index] {
             // Send filter on
-            let request = json!({"request-type":"SetSourceFilterVisibility", "sourceName":appconf.video_sources[index],"message-id": random::<f64>().to_string(), "filterName":&appconf
-            .obs_mask_filter_name
-            .as_ref()
-            .unwrap_or(&"mask".to_string()) , "filterEnabled": true  });
-            senddata
-              .unbounded_send(Message::Text(request.to_string()))
-              .unwrap();
+            if &appconf.video_sources.len() > &index {
+              obsws::set_mask(
+                &senddata,
+                &appconf.video_sources[index],
+                &appconf.obs_mask_filter_name,
+                true,
+              );
+            } else {
+              eprintln!(
+                "No sourcename provided for rssi value string: {}, index {}",
+                node, index
+              )
+            }
             drone_active[index] = false;
           }
         } else {
           // Drone is connected!
           if !drone_active[index] {
             // Send filter off
-            let request = json!({"request-type":"SetSourceFilterVisibility", "sourceName":appconf.video_sources[index],"message-id": random::<f64>().to_string(), "filterName":&appconf
-            .obs_mask_filter_name
-            .as_ref()
-            .unwrap_or(&"mask".to_string()) , "filterEnabled": false  });
-            senddata
-              .unbounded_send(Message::Text(request.to_string()))
-              .unwrap();
+            if &appconf.video_sources.len() > &index {
+              obsws::set_mask(
+                &senddata,
+                &appconf.video_sources[index],
+                &appconf.obs_mask_filter_name,
+                false,
+              );
+            } else {
+              eprintln!(
+                "No sourcename provided for rssi value string: {}, index {}",
+                node, index
+              )
+            }
             drone_active[index] = true;
           }
         }
@@ -210,7 +224,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
           lap_seconds,
           lap_duration.subsec_millis()
         );
-        set_obs_text(&senddata, &appconf.laptime_sources[0], &laptime_string);
+        obsws::set_text(&senddata, &appconf.laptime_sources[0], &laptime_string);
         if appconf.filemode {
           write_file(laptime_string, "rx1_laptime.txt");
         }
@@ -219,7 +233,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         if appconf.filemode {
           write_file((intval + 1).to_string(), "rx1.txt");
         }
-        set_obs_text(
+        obsws::set_text(
           &senddata,
           &appconf.lap_sources[0],
           &(intval + 1).to_string(),
@@ -237,7 +251,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
           lap_seconds,
           lap_duration.subsec_millis()
         );
-        set_obs_text(&senddata, &appconf.laptime_sources[1], &laptime_string);
+        obsws::set_text(&senddata, &appconf.laptime_sources[1], &laptime_string);
         if appconf.filemode {
           write_file(laptime_string, "rx2_laptime.txt");
         }
@@ -247,7 +261,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         if appconf.filemode {
           write_file((intval + 1).to_string(), "rx2.txt");
         }
-        set_obs_text(
+        obsws::set_text(
           &senddata,
           &appconf.lap_sources[1],
           &(intval + 1).to_string(),
@@ -265,7 +279,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
           lap_seconds,
           lap_duration.subsec_millis()
         );
-        set_obs_text(&senddata, &appconf.laptime_sources[2], &laptime_string);
+        obsws::set_text(&senddata, &appconf.laptime_sources[2], &laptime_string);
         if appconf.filemode {
           write_file(laptime_string, "rx3_laptime.txt");
         }
@@ -275,7 +289,7 @@ async fn udp_comm(appconf: &Conf, senddata: futures::channel::mpsc::UnboundedSen
         if appconf.filemode {
           write_file((intval + 1).to_string(), "rx3.txt");
         }
-        set_obs_text(
+        obsws::set_text(
           &senddata,
           &appconf.lap_sources[2],
           &(intval + 1).to_string(),
@@ -416,17 +430,4 @@ async fn obschan_to_nowhere(mut obsrx: futures::channel::mpsc::UnboundedReceiver
   loop {
     obsrx.next().await.unwrap();
   }
-}
-
-fn set_obs_text(
-  wschannel: &futures::channel::mpsc::UnboundedSender<Message>,
-  source: &String,
-  text: &String,
-) {
-  let request = json!({"request-type":"SetTextFreetype2Properties", "source":source,"message-id": random::<f64>().to_string(), "text": text });
-  wschannel
-    .unbounded_send(Message::Text(request.to_string()))
-    .unwrap_or_else(|err| {
-      eprintln!("Could not send to OBS: {}", err);
-    });
 }
